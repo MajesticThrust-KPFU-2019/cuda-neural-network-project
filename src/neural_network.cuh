@@ -21,13 +21,17 @@ class NeuralNetwork {
 	// the class must be created on the device for the virtual methods to work!
 
 private:
-	std::vector<unsigned int> layer_sizes;
+	/** Layer dimensions of the neural network */
+	std::vector<unsigned int> layer_sizes_;
 
-	/** weight matrices, n_layers - 1 */
+	/** Weight matrices, n_layers - 1 */
 	std::vector<float*> dev_weights;
 
-	/** activations from the last forward propagation, n_layers - 1 */
+	/** Activations from the last forward propagation, n_layers - 1 */
 	std::vector<float*> dev_activations;
+
+public:
+	const decltype(layer_sizes_)& layer_sizes() const;
 
 public:
 	/**
@@ -37,7 +41,7 @@ public:
 	~NeuralNetwork();
 
 	void init_random();
-	void predict();
+	void predict(float *&devInput, float *&devOutput);
 	void train_batch();
 };
 
