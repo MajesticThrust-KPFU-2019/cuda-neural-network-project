@@ -6,18 +6,14 @@
 
 #include <cuda_runtime.h>
 #include "cuda_helpers/helper_cuda.h"
+#include <cublas_v2.h>
 
 #include "utils.hpp"
 
-void printOnLastCudaError(const char *msg) {
-	auto err = cudaGetLastError();
-	if (err != cudaSuccess)
-		fprintf(stderr, "%s\n%s\n", msg, cudaGetErrorString(err));
-}
-
-void printOnLastCudaError(const std::string msg) {
-	printOnLastCudaError(msg.c_str());
-}
+//void printLastCublasError(cublasStatus_t status, const char *msg) {
+//	if (status != CUBLAS_STATUS_SUCCESS)
+//		printf(stderr, "%s\n%s\n", msg, _cudaGetErrorEnum(status));
+//}
 
 /**
  * Convert 2-dim index to 1-dim. Used to index matrices stored as 1-dim arrays.
@@ -48,21 +44,27 @@ NeuralNetwork::NeuralNetwork(std::initializer_list<unsigned int> layer_sizes) :
 		auto size = next_ls * (prev_ls + 1) + sizeof(float);
 		auto w_i = i - 1;
 		cudaMalloc((void**) &(this->dev_weights[w_i]), size);
-		printOnLastCudaError(string_format("Error allocating weights %d", w_i));
+		getLastCudaError(
+				string_format("Error allocating weights %d", w_i).c_str());
 	}
 
 	// allocate activation vectors
 	this->dev_activations = std::vector<float*>(this->layer_sizes_.size() - 1);
 	for (auto i = 1; i < this->layer_sizes_.size(); i++) {
 		auto layer_size = this->layer_sizes_[i];
-		auto act_i = i - 1;
 
-		cudaMalloc((void**) &(this->dev_activations[act_i]),
-				layer_size * sizeof(float));
-		printOnLastCudaError(
-				string_format("Error allocating activation %d", act_i));
+		// include trailing 1 for a bias
+		auto size = (layer_size + 1) * sizeof(float);
+		auto act_i = i - 1;
+		cudaMalloc((void**) &(this->dev_activations[act_i]), size);
+		getLastCudaError(
+				string_format("Error allocating activation %d", act_i).c_str());
 
 	}
+
+	// allocate context
+	auto status = cublasCreate(&this->cublasHandle);
+	checkCudaErrors(status);
 }
 
 NeuralNetwork::~NeuralNetwork() {
@@ -73,10 +75,22 @@ NeuralNetwork::~NeuralNetwork() {
 	for (auto const &devPtr : this->dev_activations) {
 		cudaFree(devPtr);
 	}
+
+	auto status = cublasDestroy(this->cublasHandle);
+	checkCudaErrors(status);
+}
+
+__global__ void fill_array_randomly() {
+	// TODO
 }
 
 void NeuralNetwork::init_random() {
 	// fill weights in a random fashion
+	for (auto i = 0; i < this->layer_sizes_.size(); i++) {
+		auto l_prev = this->layer_sizes_[i];
+		auto l_next = this->layer_sizes_[i + 1];
+	}
+
 }
 
 //	void init_from_data() {
@@ -84,20 +98,40 @@ void NeuralNetwork::init_random() {
 //	}
 
 /**
- * Forward propagation.
+ * Forward propagation. Fills internal activation vectors.
  *
  * Expects the input to be a vector with the same length as the input layer.
  * Expects the output to have enough allocated space for the output vector.
  */
-void NeuralNetwork::predict(float *&devInput, float *&devOutput) {
-	// the predict should copy vector to the device and copy the result from device to host
-	// because the result is intended to be consumed from the outside
+void NeuralNetwork::predict(float *devInput, float *devOutput) {
+	cublasStatus_t status;
+
+	float *layerInput = devInput;
+	float *layerOutput = this->dev_activations[0];
+
+	float alpha = 1, beta = 1;
+
+	// propagate forward
+	for (auto i = 0; i < this->layer_sizes_.size(); i++) {
+		auto l_prev = this->layer_sizes_[i];
+		auto l_next = this->layer_sizes_[i + 1];
+
+		status = cublasSgemv(this->cublasHandle, CUBLAS_OP_N, l_next,
+				l_prev + 1, &alpha, this->dev_weights[i], l_next, layerInput, 1,
+				&beta, layerOutput, 1);
+		checkCudaErrors(status);
+
+		layerInput = layerOutput;
+		layerOutput = this->dev_activations[i + 1];
+	}
+
+	// copy final activation to the output
+	auto last_i = this->layer_sizes_.size() - 1;
+	cudaMemcpy(devOutput, this->dev_activations[last_i], this->layer_sizes_[last_i], cudaMemcpyDeviceToDevice);
+	getLastCudaError("Unable to copy the last ANN activation to the output");
 }
 
-// or maybe just `train`? how should the dataset be loaded into memory?
-// it would make sense to pass device pointers there
-// this ideally should be a coroutine, but those are not yet supported
-// so synchronous code it is
+// pass dev pointer(s) to the batch, and a dev pointer for output
 void NeuralNetwork::train_batch() {
 	//
 }

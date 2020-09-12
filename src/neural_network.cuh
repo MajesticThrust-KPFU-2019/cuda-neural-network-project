@@ -10,6 +10,7 @@
 
 #include <initializer_list>
 #include <vector>
+#include <cublas_v2.h>
 
 /**
  * @brief - A host object that uses CUDA kernels under the hood to speed up the calculations.
@@ -24,11 +25,14 @@ private:
 	/** Layer dimensions of the neural network */
 	std::vector<unsigned int> layer_sizes_;
 
-	/** Weight matrices, n_layers - 1 */
+	/** Weight matrices, column-major, n_layers - 1 */
 	std::vector<float*> dev_weights;
 
 	/** Activations from the last forward propagation, n_layers - 1 */
 	std::vector<float*> dev_activations;
+
+	/** cuBLAS context */
+	cublasHandle_t cublasHandle;
 
 public:
 	const decltype(layer_sizes_)& layer_sizes() const;
@@ -41,7 +45,7 @@ public:
 	~NeuralNetwork();
 
 	void init_random();
-	void predict(float *&devInput, float *&devOutput);
+	void predict(float *devInput, float *devOutput);
 	void train_batch();
 };
 
