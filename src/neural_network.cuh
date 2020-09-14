@@ -44,8 +44,8 @@ public:
 	NeuralNetwork(std::initializer_list<unsigned int> layer_sizes);
 	~NeuralNetwork();
 
-	void init_random();
-	void predict(float *devInput, float *devOutput);
+	void init_random(float min = -1, float max = 1);
+	void predict(float *dev_input, float *dev_output);
 	void train_batch();
 };
 
