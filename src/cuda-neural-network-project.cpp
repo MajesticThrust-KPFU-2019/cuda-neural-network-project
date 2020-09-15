@@ -9,7 +9,7 @@
 #include <iostream>
 #include <vector>
 #include <algorithm>
-#include <mnist/mnist_reader.hpp>
+#include "mnist/mnist_reader.hpp"
 
 #include <cuda_runtime.h>
 #include "cuda_helpers/helper_cuda.h"

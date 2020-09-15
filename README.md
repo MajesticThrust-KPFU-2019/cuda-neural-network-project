@@ -2,7 +2,7 @@
 
 An implementation of a feedforward ANN with optimization via backpropagation and genetic algorithm.
 
-Developed using [Eclipse CDT](https://www.eclipse.org/cdt/) with [Nsight Eclipse Plugins](https://docs.nvidia.com/cuda/nsight-eclipse-plugins-guide/index.html).
+Developed using Nsight Eclipse for CUDA 10.2.
 
 # Init
 
@@ -19,5 +19,3 @@ git clone https://github.com/MajesticThrust-KPFU-2019/cuda-neural-network-projec
 cd cuda-neural-network-project
 git submodule update --init --recursive
 ```
-
-If using the Eclipse IDE with Nsight plugin, the project folder must be in the root of the workspace, so as to not break the includes from submodules.
