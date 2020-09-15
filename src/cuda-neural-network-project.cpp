@@ -16,6 +16,13 @@
 
 #include "neural_network.cuh"
 
+void print_vector(const std::vector<float>& v) {
+	for (auto o : v) {
+		std::cout << o << " ";
+	}
+	std::cout << std::endl;
+}
+
 int main() {
 	auto dataset = mnist::read_dataset<std::vector, std::vector, uint8_t,
 			uint8_t>();
@@ -29,14 +36,20 @@ int main() {
 	std::cout << "Nbr of test labels = " << dataset.test_labels.size()
 			<< std::endl;
 
-	const auto input_size = 28 * 28;
-	const auto output_size = 10;
+//	const auto input_size = 28 * 28;
+//	const auto output_size = 10;
 
-	auto ann = NeuralNetwork { input_size, 300, output_size };
+	const auto input_size = 3;
+	const auto output_size = 2;
+
+//	auto ann = NeuralNetwork { input_size, 300, output_size };
+	auto ann = NeuralNetwork { input_size, 2, output_size };
 	ann.init_random();
 
 	auto input_vector = std::vector<float>(input_size);
-	std::fill(input_vector.begin(), input_vector.end(), 1);
+	std::fill(input_vector.begin(), input_vector.end(), 2);
+
+	print_vector(input_vector);
 
 	float *dev_input;
 	cudaMalloc((void**) &dev_input, input_size * sizeof(float));
@@ -53,13 +66,10 @@ int main() {
 	ann.predict(dev_input, dev_output);
 
 	auto output_vector = std::vector<float>(output_size);
-	cudaMemcpy(output_vector.data(), dev_output, output_size,
+	cudaMemcpy(output_vector.data(), dev_output, output_size * sizeof(float),
 			cudaMemcpyDeviceToHost);
 
-	for (auto o : output_vector) {
-		std::cout << o << " ";
-	}
-	std::cout << std::endl;
+	print_vector(output_vector);
 
 	return 0;
 }

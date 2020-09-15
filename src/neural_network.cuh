@@ -28,6 +28,9 @@ private:
 	/** Weight matrices, column-major, n_layers - 1 */
 	std::vector<float*> dev_weights;
 
+	/** Bias vectors, n_layers - 1 */
+	std::vector<float*> dev_biases;
+
 	/** Activations from the last forward propagation, n_layers - 1 */
 	std::vector<float*> dev_activations;
 
