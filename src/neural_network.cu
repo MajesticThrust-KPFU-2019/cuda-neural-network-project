@@ -28,6 +28,33 @@ void print_vector2(const std::vector<float>& v) {
 }
 
 /**
+ * Invoke a __global__ function with max occupancy.
+ * @param dynamicSMemSize - Per-block dynamic shared memory usage intended, in bytes (see cudaOccupancyMaxPotentialBlockSize)
+ * @param blockSizeLimit - The maximum block size func is designed to work with. 0 means no limit ((see cudaOccupancyMaxPotentialBlockSize)
+ * @param inputSize - number of elements that can be processed in parallel by a single thread each
+ * @param func - the __global__ function in question
+ * @param funcArgs - func arguments as a parameter_pack
+ */
+template<class ...Args>
+void cudaInvokeMaxOccupancy(size_t dynamicSMemSize, int blockSizeLimit,
+		int inputSize, void (*func)(Args...), Args ... funcArgs) {
+	// The launch configurator returned block size
+	int blockSize;
+	// The minimum grid size needed to achieve the
+	// maximum occupancy for a full device launch
+	int minGridSize;
+
+	cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, func,
+			dynamicSMemSize, blockSizeLimit);
+
+	// The actual grid size needed, based on input size
+	// Round up according to array size
+	auto gridSize = (inputSize + blockSize - 1) / blockSize;
+
+	func<<< gridSize, blockSize >>>(funcArgs...);
+}
+
+/**
  * Convert 2-dim index to 1-dim. Used to index matrices stored as 1-dim arrays.
  * @param i
  * @param j
@@ -180,7 +207,7 @@ void NeuralNetwork::init_random(float min, float max) {
 //	}
 
 /**
- * Sigmoid function.
+ * Vectorized sigmoid function.
  * @param x - input vector allocated on device
  * @param y - output vector allocated on device
  * @param N - length of each vector
@@ -191,6 +218,22 @@ __global__ void sigmoid(const float *x, float *y, unsigned int N) {
 
 	for (; tidx < N; tidx += stride) {
 		y[tidx] = 1.0 / (1 + expf(-x[tidx]));
+	}
+}
+
+/**
+ * Vectorized sigmoid derivative function.
+ * @param x - input vector allocated on device with precomputed sigmoid values
+ * @param y - output vector allocated on device
+ * @param N - length of each vector
+ */
+__global__ void sigmoid_derivative(const float *sig_x, float *y,
+		unsigned int N) {
+	int tidx = threadIdx.x + blockIdx.x * blockDim.x;
+	int stride = blockDim.x * gridDim.x;
+
+	for (; tidx < N; tidx += stride) {
+		y[tidx] = sig_x[tidx] * (1 - sig_x[tidx]);
 	}
 }
 
@@ -246,19 +289,9 @@ void NeuralNetwork::predict(float *dev_input, float *dev_output) {
 		print_cuda_matrix(layer_output, l_next, 1);
 		printf("\n");
 
-		// The launch configurator returned block size
-		int blockSize;
-		// The minimum grid size needed to achieve the
-		// maximum occupancy for a full device launch
-		int minGridSize;
-
-		cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, sigmoid, 0,
-				0);
-		// The actual grid size needed, based on input size
-		// Round up according to array size
-		auto gridSize = (l_next + blockSize - 1) / blockSize;
-
-		sigmoid<<< gridSize, blockSize >>>(layer_output, layer_output, l_next);
+		// apply sigmoid in-place to activation vector
+		cudaInvokeMaxOccupancy(0, 0, l_next, sigmoid,
+				(const float *) layer_output, layer_output, l_next);
 
 		printf("Output %d:\n", i);
 		print_cuda_matrix(layer_output, l_next, 1);
@@ -276,7 +309,7 @@ void NeuralNetwork::predict(float *dev_input, float *dev_output) {
 }
 
 // pass dev pointer(s) to the batch, and a dev pointer for output
-void NeuralNetwork::train_batch() {
+void NeuralNetwork::train_batch(std::vector<float*> dev_batch) {
 	//
 }
 

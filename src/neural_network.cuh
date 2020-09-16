@@ -49,7 +49,7 @@ public:
 
 	void init_random(float min = -1, float max = 1);
 	void predict(float *dev_input, float *dev_output);
-	void train_batch();
+	void train_batch(std::vector<float*> dev_batch);
 };
 
 #endif /* NEURAL_NETWORK_CUH_ */
