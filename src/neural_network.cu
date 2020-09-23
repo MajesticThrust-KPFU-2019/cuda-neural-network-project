@@ -3,9 +3,9 @@
 #include <initializer_list>
 #include <vector>
 #include <exception>
-#include <random>     // mt19937 and uniform_int_distribution
-#include <algorithm>  // generate
-#include <functional> // bind
+#include <random>
+#include <algorithm>
+#include <functional>
 #include <time.h>
 
 #include <cuda_runtime.h>
@@ -38,6 +38,7 @@ void print_vector2(const std::vector<float>& v) {
 template<class ...Args>
 void cudaInvokeMaxOccupancy(size_t dynamicSMemSize, int blockSizeLimit,
 		int inputSize, void (*func)(Args...), Args ... funcArgs) {
+	// see https://developer.nvidia.com/blog/cuda-pro-tip-occupancy-api-simplifies-launch-configuration/
 	// The launch configurator returned block size
 	int blockSize;
 	// The minimum grid size needed to achieve the
@@ -73,7 +74,9 @@ void print_cuda_matrix(const float* dev_ptr, size_t nrows, size_t ncols) {
 
 	cudaMemcpy(h_matrix, dev_ptr, nrows * ncols * sizeof(float),
 			cudaMemcpyDeviceToHost);
-	getLastCudaError("Unable to copy data from device to host");
+	getLastCudaError(
+			string_format("Unable to copy data from device (%d) to host",
+					dev_ptr).c_str());
 
 	for (auto i = 0; i < nrows; i++) {
 		for (auto j = 0; j < ncols; j++) {
@@ -115,23 +118,29 @@ NeuralNetwork::NeuralNetwork(std::initializer_list<unsigned int> layer_sizes) :
 				string_format("Error allocating biases %d", i).c_str());
 	}
 
-	// allocate activation vectors
+	// allocate activation and error vectors
 	// skip the input layer
 	this->dev_activations = std::vector<float*>(this->layer_sizes_.size() - 1);
+	this->dev_errors = std::vector<float*>(this->layer_sizes_.size() - 1);
 	for (auto i = 0; i < this->layer_sizes_.size() - 1; i++) {
 		auto layer_size = this->layer_sizes_[i + 1];
 
-		// include trailing 1 for a bias
 		auto size = layer_size * sizeof(float);
 		cudaMalloc((void**) &(this->dev_activations[i]), size);
 		getLastCudaError(
 				string_format("Error allocating activation %d", i).c_str());
 
-		// fill with 1's
-		cudaMemset(this->dev_activations[i], 1, size);
-		getLastCudaError(
-				string_format("Error filling activation %d with 1's", i).c_str());
+		cudaMalloc((void**) &(this->dev_errors[i]), size);
+		getLastCudaError(string_format("Error allocating error %d", i).c_str());
 	}
+
+	// allocate intermediate vector
+	auto max_layer_size = *std::max_element(this->layer_sizes_.cbegin(),
+			this->layer_sizes_.cend());
+	cudaMalloc((void**) &this->dev_intermediate,
+			max_layer_size * sizeof(float));
+	getLastCudaError(
+			string_format("Error allocating intermediate vector").c_str());
 
 	// allocate context
 	auto status = cublasCreate(&this->cublasHandle);
@@ -150,6 +159,12 @@ NeuralNetwork::~NeuralNetwork() {
 	for (auto const &dev_ptr : this->dev_activations) {
 		cudaFree(dev_ptr);
 	}
+
+	for (auto const &dev_ptr : this->dev_errors) {
+		cudaFree(dev_ptr);
+	}
+
+	cudaFree(this->dev_intermediate);
 
 	auto status = cublasDestroy(this->cublasHandle);
 	checkCudaErrors(status);
@@ -238,15 +253,22 @@ __global__ void sigmoid_derivative(const float *sig_x, float *y,
 }
 
 /**
- * Forward propagation. Fills internal activation vectors.
- *
- * Expects the input to be a vector with the same length as the input layer.
- * Expects the output to have enough allocated space for the output vector.
+ * Haramard product for vectors. y is both an input and an output.
  */
-void NeuralNetwork::predict(float *dev_input, float *dev_output) {
+__global__ void vhadamard(const float *x, float *y, unsigned int N) {
+	int tidx = threadIdx.x + blockIdx.x * blockDim.x;
+	int stride = blockDim.x * gridDim.x;
+
+	for (; tidx < N; tidx += stride) {
+		y[tidx] = y[tidx] * x[tidx];
+	}
+}
+
+void NeuralNetwork::evaluate(const float *dev_input) {
+	// TODO rewrite to use batches? (switch Sgemv to Sgemm)
 	cublasStatus_t status;
 
-	float *layer_input = dev_input;
+	const float *layer_input = dev_input;
 
 	float alpha = 1, beta = 1;
 
@@ -301,15 +323,100 @@ void NeuralNetwork::predict(float *dev_input, float *dev_output) {
 	}
 
 	// copy final activation to the output
-	auto last_layer_size = this->layer_sizes_.back();
-	auto last_activation = this->dev_activations.back();
-	cudaMemcpy(dev_output, last_activation, last_layer_size * sizeof(float),
-			cudaMemcpyDeviceToDevice);
-	getLastCudaError("Unable to copy the last ANN activation to the output");
+//	auto last_layer_size = this->layer_sizes_.back();
+//	auto last_activation = this->dev_activations.back();
+//	cudaMemcpy(dev_output, last_activation, last_layer_size * sizeof(float),
+//			cudaMemcpyDeviceToDevice);
+//	getLastCudaError("Unable to copy the last ANN activation to the output");
 }
 
-// pass dev pointer(s) to the batch, and a dev pointer for output
-void NeuralNetwork::train_batch(std::vector<float*> dev_batch) {
-	//
+void NeuralNetwork::train(const float* dev_x_train, const float* dev_y_train,
+		float learning_rate, float *out_cost) {
+	cublasStatus_t status;
+	// needed to pass into cublasSgemm as a negative coefficient when updating weights
+	learning_rate = -learning_rate;
+
+	// see https://brilliant.org/wiki/backpropagation/
+	// ^ The Backpropagation Algorithm paragraph
+
+	int i = this->layer_sizes_.size() - 1 - 1;
+	auto size = this->layer_sizes_[i];
+
+	// save layer outputs
+	this->evaluate(dev_x_train);
+
+	// TODO biases
+
+	// compute error for the output layer
+
+	// write sigmoid derivative into error vector
+	cudaInvokeMaxOccupancy(0, 0, size, sigmoid_derivative,
+			(const float *) this->dev_activations[i], this->dev_errors[i],
+			size);
+
+	// compute output delta and overwrite output layer activation
+	// (which is no longer needed, as the sigmoid derivative is already computed)
+	float alpha = -1;
+	status = cublasSaxpy(this->cublasHandle, size, &alpha, dev_y_train, 1,
+			this->dev_activations[i], 1);
+	checkCudaErrors(status);
+
+	// write MSE error to the method output
+	status = cublasSdot(this->cublasHandle, size, this->dev_activations[i], 1,
+			this->dev_activations[i], 1, out_cost);
+	checkCudaErrors(status);
+	*out_cost /= 2.0 * size;
+
+	printf("MSE error = %f\n", *out_cost);
+	print_cuda_matrix(this->dev_activations[i], size, 1);
+
+	// compute output layer error
+	cudaInvokeMaxOccupancy(0, 0, size, vhadamard,
+			(const float *) this->dev_activations[i], this->dev_errors[i],
+			size);
+
+	printf("Last layer error:\n");
+	print_cuda_matrix(this->dev_errors[i], size, 1);
+
+	i--;
+	printf("Starting loop from i = %d; i >= 0 == %d\n", i, i >= 0);
+
+	// compute errors for hidden layers, update weights
+//	while (i >= 0) {
+	while (true) {
+		printf("Backprop i = %d", i);
+		auto rnext = this->layer_sizes_[i + 1];
+		auto rprev = this->layer_sizes_[i];
+
+		// update weights
+		float beta = 1;
+		status = cublasSgemm(this->cublasHandle, CUBLAS_OP_N, CUBLAS_OP_N,
+				rnext, rprev, 1, &learning_rate, this->dev_errors[i + 1], rnext,
+				this->dev_activations[i], rprev, &beta,
+				this->dev_weights[i + 1], rnext);
+		checkCudaErrors(status);
+
+		// compute sigmoid derivative and write it into the output vector
+		cudaInvokeMaxOccupancy(0, 0, rprev, sigmoid_derivative,
+				(const float *) this->dev_activations[i],
+				this->dev_activations[i], rprev);
+
+		// write error intermediate into the error vector
+		alpha = 1;
+		status = cublasSgemv(this->cublasHandle, CUBLAS_OP_T, rnext, rprev,
+				&alpha, this->dev_weights[i + 1], rnext,
+				this->dev_errors[i + 1], 1, 0, this->dev_errors[i], 1);
+		checkCudaErrors(status);
+
+		// compute error
+		cudaInvokeMaxOccupancy(0, 0, rprev, vhadamard,
+				(const float *) this->dev_activations[i], this->dev_errors[i],
+				rprev);
+
+		i--;
+
+		if (i >= 0)
+			break;
+	}
 }
 

@@ -49,7 +49,10 @@ int main() {
 	auto input_vector = std::vector<float>(input_size);
 	std::fill(input_vector.begin(), input_vector.end(), 2);
 
-	print_vector(input_vector);
+	auto expected_output_vector = std::vector<float>(output_size);
+	std::fill(expected_output_vector.begin(), expected_output_vector.end(), 1);
+
+//	print_vector(input_vector);
 
 	float *dev_input;
 	cudaMalloc((void**) &dev_input, input_size * sizeof(float));
@@ -63,12 +66,39 @@ int main() {
 			cudaMemcpyHostToDevice);
 	getLastCudaError("Copy input vector to device");
 
-	ann.predict(dev_input, dev_output);
+	cudaMemcpy(dev_output, expected_output_vector.data(),
+			output_size * sizeof(float), cudaMemcpyHostToDevice);
+	getLastCudaError("Copy output vector to device");
+
+	float learning_rate = 0.05;
+	float error = 0;
+
+//	ann.predict(dev_input, dev_output);
 
 	auto output_vector = std::vector<float>(output_size);
+
+	// iter 1
+	ann.train(dev_input, dev_output, learning_rate, &error);
 	cudaMemcpy(output_vector.data(), dev_output, output_size * sizeof(float),
 			cudaMemcpyDeviceToHost);
 
+	printf("Error: %f", error);
+	print_vector(output_vector);
+
+	// iter 2
+	ann.train(dev_input, dev_output, learning_rate, &error);
+	cudaMemcpy(output_vector.data(), dev_output, output_size * sizeof(float),
+			cudaMemcpyDeviceToHost);
+
+	printf("Error: %f", error);
+	print_vector(output_vector);
+
+	// iter 3
+	ann.train(dev_input, dev_output, learning_rate, &error);
+	cudaMemcpy(output_vector.data(), dev_output, output_size * sizeof(float),
+			cudaMemcpyDeviceToHost);
+
+	printf("Error: %f", error);
 	print_vector(output_vector);
 
 	return 0;
