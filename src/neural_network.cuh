@@ -35,7 +35,7 @@ private:
 	/** Bias vectors, n_layers - 1 */
 	std::vector<float*> dev_biases;
 
-	/** Activations from the last forward propagation, n_layers - 1 */
+	/** Activations from the last forward propagation, n_layers. Includes input and output layers. */
 	std::vector<float*> dev_activations;
 
 	/** Errors for each layer, n_layers - 1 */

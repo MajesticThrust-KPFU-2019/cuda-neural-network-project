@@ -39,20 +39,23 @@ int main() {
 //	const auto input_size = 28 * 28;
 //	const auto output_size = 10;
 
-	const auto input_size = 3;
+	const auto input_size = 4;
 	const auto output_size = 2;
 
 //	auto ann = NeuralNetwork { input_size, 300, output_size };
-	auto ann = NeuralNetwork { input_size, 2, output_size };
+	auto ann = NeuralNetwork { input_size, 3, output_size };
 	ann.init_random();
 
-	auto input_vector = std::vector<float>(input_size);
-	std::fill(input_vector.begin(), input_vector.end(), 2);
+//	auto input_vector = std::vector<float>(input_size);
+//	std::fill(input_vector.begin(), input_vector.end(), 0.5);
+	auto input_vector = std::vector<float> { 0.4, 0.6, 0.2, 0.9 };
+	printf("Input vector\n");
+	print_vector(input_vector);
 
 	auto expected_output_vector = std::vector<float>(output_size);
 	std::fill(expected_output_vector.begin(), expected_output_vector.end(), 1);
-
-//	print_vector(input_vector);
+	printf("Expected output vector\n");
+	print_vector(expected_output_vector);
 
 	float *dev_input;
 	cudaMalloc((void**) &dev_input, input_size * sizeof(float));
@@ -82,7 +85,7 @@ int main() {
 	cudaMemcpy(output_vector.data(), dev_output, output_size * sizeof(float),
 			cudaMemcpyDeviceToHost);
 
-	printf("Error: %f", error);
+	printf("Error: %f\n", error);
 	print_vector(output_vector);
 
 	// iter 2
@@ -90,7 +93,7 @@ int main() {
 	cudaMemcpy(output_vector.data(), dev_output, output_size * sizeof(float),
 			cudaMemcpyDeviceToHost);
 
-	printf("Error: %f", error);
+	printf("Error: %f\n", error);
 	print_vector(output_vector);
 
 	// iter 3
@@ -98,7 +101,7 @@ int main() {
 	cudaMemcpy(output_vector.data(), dev_output, output_size * sizeof(float),
 			cudaMemcpyDeviceToHost);
 
-	printf("Error: %f", error);
+	printf("Error: %f\n", error);
 	print_vector(output_vector);
 
 	return 0;
