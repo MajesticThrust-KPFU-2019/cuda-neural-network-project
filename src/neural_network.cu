@@ -11,9 +11,6 @@
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 
-#include <curand.h>
-#include <curand_kernel.h>
-
 #include "cuda_helpers/helper_cuda.h"
 
 #include "utils.hpp"
@@ -53,8 +50,8 @@ void cudaInvokeMaxOccupancy(size_t dynamicSMemSize, int blockSizeLimit,
 	// Round up according to array size
 	auto gridSize = (inputSize + blockSize - 1) / blockSize;
 
-	printf("Launching kernel with gridSize=%d, blockSize=%d\n", gridSize,
-			blockSize);
+//	printf("Launching kernel with gridSize=%d, blockSize=%d\n", gridSize,
+//			blockSize);
 
 	func<<< gridSize, blockSize >>>(funcArgs...);
 }
@@ -93,7 +90,7 @@ void print_cuda_matrix(const float* dev_ptr, size_t nrows, size_t ncols) {
 	delete[] h_matrix;
 }
 
-NeuralNetwork::NeuralNetwork(std::initializer_list<unsigned int> layer_sizes) :
+NeuralNetwork::NeuralNetwork(std::initializer_list<size_t> layer_sizes) :
 		layer_sizes_(layer_sizes) {
 	if (this->layer_sizes_.size() < 2) {
 		throw std::invalid_argument("Must specify at least 2 layers!");
@@ -195,20 +192,21 @@ void NeuralNetwork::init_random(float min, float max) {
 		auto weights_size = l_next * l_prev * sizeof(float);
 		auto biases_size = l_next * sizeof(float);
 
-		printf(
-				"\nFilling layer %d; sizes: [%d, %d]; weights size: %d, biases size: %d\n",
-				i, l_prev, l_next, weights_size, biases_size);
+//		printf(
+//				"\nFilling layer %d; sizes: [%d, %d]; weights size: %d, biases size: %d\n",
+//				i, l_prev, l_next, weights_size, biases_size);
 
 		// fill weights with (min .. max] floats
 		auto weights = new std::vector<float>(weights_size);
 		std::generate(weights->begin(), weights->end(), gen_f);
-		printf("Generated weights %d on host:\n", i);
-		print_vector2(*weights);
+//		printf("Generated weights %d on host:\n", i);
+//		print_vector2(*weights);
 
 		auto biases = new std::vector<float>(biases_size);
-		std::generate(biases->begin(), biases->end(), gen_f);
-		printf("Generated biases %d on host:\n", i);
-		print_vector2(*biases);
+//		std::generate(biases->begin(), biases->end(), gen_f);
+		std::fill(biases->begin(), biases->end(), 0);
+//		printf("Generated biases %d on host:\n", i);
+//		print_vector2(*biases);
 
 		// copy to device
 		cudaMemcpy(this->dev_weights[i], weights->data(), weights_size,
@@ -236,7 +234,7 @@ void NeuralNetwork::init_random(float min, float max) {
  * @param y - output vector allocated on device
  * @param N - length of each vector
  */
-__global__ void sigmoid(const float *x, float *y, unsigned int N) {
+__global__ void sigmoid(const float *x, float *y, size_t N) {
 	int tidx = threadIdx.x + blockIdx.x * blockDim.x;
 	int stride = blockDim.x * gridDim.x;
 
@@ -251,8 +249,7 @@ __global__ void sigmoid(const float *x, float *y, unsigned int N) {
  * @param y - output vector allocated on device
  * @param N - length of each vector
  */
-__global__ void sigmoid_derivative(const float *sig_x, float *y,
-		unsigned int N) {
+__global__ void sigmoid_derivative(const float *sig_x, float *y, size_t N) {
 	int tidx = threadIdx.x + blockIdx.x * blockDim.x;
 	int stride = blockDim.x * gridDim.x;
 
@@ -264,7 +261,7 @@ __global__ void sigmoid_derivative(const float *sig_x, float *y,
 /**
  * Hadamard product for vectors. y is both an input and an output.
  */
-__global__ void vhadamard(const float *x, float *y, unsigned int N) {
+__global__ void vhadamard(const float *x, float *y, size_t N) {
 	int tidx = threadIdx.x + blockIdx.x * blockDim.x;
 	int stride = blockDim.x * gridDim.x;
 
@@ -274,18 +271,17 @@ __global__ void vhadamard(const float *x, float *y, unsigned int N) {
 }
 
 void NeuralNetwork::evaluate(const float *dev_input) {
-	// TODO rewrite to use batches? (switch Sgemv to Sgemm)
 	cublasStatus_t status;
 
-//	const float *layer_input = dev_input;
 	cudaMemcpy(this->dev_activations[0], dev_input,
 			this->layer_sizes_[0] * sizeof(float), cudaMemcpyDeviceToDevice);
+	getLastCudaError("Error copying input vector to the first activation");
 
 	float alpha = 1, beta = 1;
 
 	// propagate forward
 	for (auto i = 0; i < this->layer_sizes_.size() - 1; i++) {
-		printf("\nIteration %d\n\n", i);
+//		printf("\nIteration %d\n\n", i);
 
 		auto l_prev = this->layer_sizes_[i];
 		auto l_next = this->layer_sizes_[i + 1];
@@ -293,19 +289,19 @@ void NeuralNetwork::evaluate(const float *dev_input) {
 		auto layer_input = this->dev_activations[i];
 		auto layer_output = this->dev_activations[i + 1];
 
-		printf("Prev layer - %d, next layer - %d\n\n", l_prev, l_next);
+//		printf("Prev layer - %d, next layer - %d\n\n", l_prev, l_next);
 
-		printf("Weights %d:\n", i);
-		print_cuda_matrix(this->dev_weights[i], l_next, l_prev);
-		printf("\n");
+//		printf("Weights %d:\n", i);
+//		print_cuda_matrix(this->dev_weights[i], l_next, l_prev);
+//		printf("\n");
 
-		printf("Biases %d:\n", i);
-		print_cuda_matrix(this->dev_biases[i], l_next, 1);
-		printf("\n");
+//		printf("Biases %d:\n", i);
+//		print_cuda_matrix(this->dev_biases[i], l_next, 1);
+//		printf("\n");
 
-		printf("Input %d:\n", i);
-		print_cuda_matrix(layer_input, l_prev, 1);
-		printf("\n");
+//		printf("Input %d:\n", i);
+//		print_cuda_matrix(layer_input, l_prev, 1);
+//		printf("\n");
 
 		// y param in cublasSgemv is both an input (bias) and an output (activation)
 		// hence, copy bias into the activation
@@ -319,17 +315,17 @@ void NeuralNetwork::evaluate(const float *dev_input) {
 				layer_output, 1);
 		checkCudaErrors(status);
 
-		printf("Output %d after Sgemv:\n", i);
-		print_cuda_matrix(layer_output, l_next, 1);
-		printf("\n");
+//		printf("Output %d after Sgemv:\n", i);
+//		print_cuda_matrix(layer_output, l_next, 1);
+//		printf("\n");
 
 		// apply sigmoid in-place to activation vector
 		cudaInvokeMaxOccupancy(0, 0, l_next, sigmoid,
 				(const float *) layer_output, layer_output, l_next);
 
-		printf("Output %d:\n", i);
-		print_cuda_matrix(layer_output, l_next, 1);
-		printf("\n");
+//		printf("Output %d:\n", i);
+//		print_cuda_matrix(layer_output, l_next, 1);
+//		printf("\n");
 	}
 
 	// copy final activation to the output
@@ -338,6 +334,14 @@ void NeuralNetwork::evaluate(const float *dev_input) {
 //	cudaMemcpy(dev_output, last_activation, last_layer_size * sizeof(float),
 //			cudaMemcpyDeviceToDevice);
 //	getLastCudaError("Unable to copy the last ANN activation to the output");
+}
+
+void NeuralNetwork::predict(const float *dev_input, float *dev_output) {
+	this->evaluate(dev_input);
+	cudaMemcpy(dev_output, this->dev_activations.back(),
+			this->layer_sizes_.back() * sizeof(float),
+			cudaMemcpyDeviceToDevice);
+	getLastCudaError("Error copying network output to dev_output");
 }
 
 void NeuralNetwork::train(const float* dev_x_train, const float* dev_y_train,
@@ -356,7 +360,7 @@ void NeuralNetwork::train(const float* dev_x_train, const float* dev_y_train,
 
 	auto rnext = this->layer_sizes_[i + 1];
 	auto rprev = this->layer_sizes_[i];
-	printf("NN train; rnext = %d, rprev = %d\n", rnext, rprev);
+//	printf("NN train; rnext = %d, rprev = %d\n", rnext, rprev);
 	auto next_activation = this->dev_activations[i + 1];
 	auto prev_activation = this->dev_activations[i];
 
@@ -368,8 +372,8 @@ void NeuralNetwork::train(const float* dev_x_train, const float* dev_y_train,
 	cudaInvokeMaxOccupancy(0, 0, rnext, sigmoid_derivative,
 			(const float *) next_activation, this->dev_errors[i], rnext);
 
-	printf("Last layer sigmoid derivative:\n");
-	print_cuda_matrix(this->dev_errors[i], rnext, 1);
+//	printf("Last layer sigmoid derivative:\n");
+//	print_cuda_matrix(this->dev_errors[i], rnext, 1);
 
 	// compute output delta and overwrite output layer activation
 	// (which is no longer needed, as the sigmoid derivative is already computed)
@@ -384,37 +388,25 @@ void NeuralNetwork::train(const float* dev_x_train, const float* dev_y_train,
 	checkCudaErrors(status);
 	*out_cost /= 2.0 * rnext;
 
-	printf("MSE error = %f\n", *out_cost);
-	print_cuda_matrix(next_activation, rnext, 1);
+//	printf("MSE error = %f\n", *out_cost);
+//	print_cuda_matrix(next_activation, rnext, 1);
 
 	// compute output layer error
 	cudaInvokeMaxOccupancy(0, 0, rnext, vhadamard,
 			(const float *) next_activation, this->dev_errors[i], rnext);
 
-	printf("Last layer error:\n");
-	print_cuda_matrix(this->dev_errors[i], rnext, 1);
+//	printf("Last layer error:\n");
+//	print_cuda_matrix(this->dev_errors[i], rnext, 1);
 
-	printf("Updating weights\n");
-	printf("Layers:\n");
-	print_vector2(this->layer_sizes());
-	printf("Error i+1:\n");
-	print_cuda_matrix(this->dev_errors[i], rnext, 1);
-	printf("Activation i:\n");
-	print_cuda_matrix(prev_activation, 1, rprev);
-	printf("Current weights i\n");
-	print_cuda_matrix(this->dev_weights[i], rnext, rprev);
-
-	// print weights delta
-//	float* testMem;
-//	cudaMalloc((void**) &testMem, sizeof(float) * rnext * rprev);
-//	float beta = 0;
-//	status = cublasSgemm(this->cublasHandle, CUBLAS_OP_N, CUBLAS_OP_N, rnext,
-//			rprev, 1, &learning_rate, this->dev_errors[i], rnext,
-//			this->dev_activations[i - 1], 1, &beta, testMem, rnext);
-//	checkCudaErrors(status);
-//	printf("Weights delta (w/o learning rate)\n");
-//	print_cuda_matrix(testMem, rnext, rprev);
-//	cudaFree(testMem);
+//	printf("Updating weights\n");
+//	printf("Layers:\n");
+//	print_vector2(this->layer_sizes());
+//	printf("Error i+1:\n");
+//	print_cuda_matrix(this->dev_errors[i], rnext, 1);
+//	printf("Activation i:\n");
+//	print_cuda_matrix(prev_activation, 1, rprev);
+//	printf("Current weights i\n");
+//	print_cuda_matrix(this->dev_weights[i], rnext, rprev);
 
 	// update weights
 	float beta = 1;
@@ -423,15 +415,8 @@ void NeuralNetwork::train(const float* dev_x_train, const float* dev_y_train,
 			prev_activation, 1, &beta, this->dev_weights[i], rnext);
 	checkCudaErrors(status);
 
-	printf("Updated weights\n");
-	print_cuda_matrix(this->dev_weights[i], rnext, rprev);
-
-	// print error vectors; TODO remove
-//	for (auto j = 0; j < this->layer_sizes_.rnext() - 1; j++) {
-//		printf("Layer %d with %d nodes\nError vector\n", j + 1,
-//				this->layer_sizes_[j + 1]);
-//		print_cuda_matrix(this->dev_errors[j], 1, this->layer_sizes_[j + 1]);
-//	}
+//	printf("Updated weights\n");
+//	print_cuda_matrix(this->dev_weights[i], rnext, rprev);
 
 	// compute errors for hidden layers, update weights
 	for (--i; i >= 0; i--) {
@@ -440,18 +425,18 @@ void NeuralNetwork::train(const float* dev_x_train, const float* dev_y_train,
 		rprev = this->layer_sizes_[i];
 		next_activation = this->dev_activations[i + 1];
 		prev_activation = this->dev_activations[i];
-		printf("Backprop i = %d; rnext2 = %d, rnext = %d, rprev = %d\n", i,
-				rnext2, rnext, rprev);
+//		printf("Backprop i = %d; rnext2 = %d, rnext = %d, rprev = %d\n", i,
+//				rnext2, rnext, rprev);
 
 		// compute sigmoid derivative and write it into the output vector
 		cudaInvokeMaxOccupancy(0, 0, rnext, sigmoid_derivative,
 				(const float *) next_activation, next_activation, rnext);
 
-		printf("Sigmoid derivative\n");
-		print_cuda_matrix(next_activation, rnext, 1);
+//		printf("Sigmoid derivative\n");
+//		print_cuda_matrix(next_activation, rnext, 1);
 
-		printf("Error i + 1\n");
-		print_cuda_matrix(this->dev_errors[i + 1], 1, rnext2);
+//		printf("Error i + 1\n");
+//		print_cuda_matrix(this->dev_errors[i + 1], 1, rnext2);
 
 		// write error intermediate into the error vector
 		alpha = 1;
@@ -462,18 +447,18 @@ void NeuralNetwork::train(const float* dev_x_train, const float* dev_y_train,
 				this->dev_errors[i], 1);
 		checkCudaErrors(status);
 
-		printf("Error intermediate\n");
-		print_cuda_matrix(this->dev_errors[i], rnext, 1);
+//		printf("Error intermediate\n");
+//		print_cuda_matrix(this->dev_errors[i], rnext, 1);
 
 		// compute error
 		cudaInvokeMaxOccupancy(0, 0, rnext, vhadamard,
 				(const float *) next_activation, this->dev_errors[i], rnext);
 
-		printf("Error\n");
-		print_cuda_matrix(this->dev_errors[i], rnext, 1);
+//		printf("Error\n");
+//		print_cuda_matrix(this->dev_errors[i], rnext, 1);
 
-		printf("Current weights i\n");
-		print_cuda_matrix(this->dev_weights[i], rnext, rprev);
+//		printf("Current weights i\n");
+//		print_cuda_matrix(this->dev_weights[i], rnext, rprev);
 
 		// update weights
 		status = cublasSgemm(this->cublasHandle, CUBLAS_OP_N, CUBLAS_OP_N,
@@ -481,8 +466,8 @@ void NeuralNetwork::train(const float* dev_x_train, const float* dev_y_train,
 				prev_activation, 1, &beta, this->dev_weights[i], rnext);
 		checkCudaErrors(status);
 
-		printf("Updated weights\n");
-		print_cuda_matrix(this->dev_weights[i], rnext, rprev);
+//		printf("Updated weights\n");
+//		print_cuda_matrix(this->dev_weights[i], rnext, rprev);
 	}
 }
 

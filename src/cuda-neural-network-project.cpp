@@ -9,12 +9,14 @@
 #include <iostream>
 #include <vector>
 #include <algorithm>
-#include "mnist/mnist_reader.hpp"
+//#include "mnist/mnist_reader.hpp"
 
 #include <cuda_runtime.h>
 #include "cuda_helpers/helper_cuda.h"
+#include <cublas_v2.h>
 
 #include "neural_network.cuh"
+#include "device_dataset.cuh"
 
 void print_vector(const std::vector<float>& v) {
 	for (auto o : v) {
@@ -23,26 +25,13 @@ void print_vector(const std::vector<float>& v) {
 	std::cout << std::endl;
 }
 
-int main() {
-	auto dataset = mnist::read_dataset<std::vector, std::vector, uint8_t,
-			uint8_t>();
-	std::cout << "Hello mnist" << std::endl; // prints
-	std::cout << "Nbr of training images = " << dataset.training_images.size()
-			<< std::endl;
-	std::cout << "Nbr of training labels = " << dataset.training_labels.size()
-			<< std::endl;
-	std::cout << "Nbr of test images = " << dataset.test_images.size()
-			<< std::endl;
-	std::cout << "Nbr of test labels = " << dataset.test_labels.size()
-			<< std::endl;
-
-//	const auto input_size = 28 * 28;
-//	const auto output_size = 10;
+int main_test() {
+//	auto dataset = mnist::read_dataset<std::vector, std::vector, uint8_t,
+//			uint8_t>();
 
 	const auto input_size = 4;
 	const auto output_size = 2;
 
-//	auto ann = NeuralNetwork { input_size, 300, output_size };
 	auto ann = NeuralNetwork { input_size, 3, output_size };
 	ann.init_random();
 
@@ -103,6 +92,75 @@ int main() {
 
 	printf("Error: %f\n", error);
 	print_vector(output_vector);
+
+	return 0;
+}
+
+int main() {
+	auto train_dataset = MnistDeviceDatasetProvider(true);
+	auto test_dataset = MnistDeviceDatasetProvider(false);
+	auto ann = NeuralNetwork { train_dataset.x_size, 300, train_dataset.y_size };
+	ann.init_random();
+
+	const auto epoch_count = 10;
+	const float learning_rate = 0.01;
+
+	float* dev_input = 0;
+	float* dev_expected_output = 0;
+	float error;
+
+	float* dev_actual_output;
+	cudaMalloc((void**) &dev_actual_output,
+			ann.layer_sizes().back() * sizeof(float));
+	getLastCudaError(
+			"Error allocating device memory for actual nn output vector");
+
+	cublasHandle_t cuhand;
+	auto status = cublasCreate(&cuhand);
+//	checkCudaErrors(status);
+
+	for (auto epoch_i = 0; epoch_i < epoch_count; epoch_i++) {
+		// train using the whole training dataset
+		printf("Epoch %d\n", epoch_i);
+		train_dataset.init_epoch();
+
+		for (auto point_i = 0; point_i < train_dataset.dataset_size;
+				point_i++) {
+			train_dataset.get_single_pair(&dev_input, &dev_expected_output);
+			ann.train(dev_input, dev_expected_output, learning_rate, &error);
+
+			if (point_i % 1000 == 0) {
+				printf("%d: cost = %f\n", point_i, error);
+			}
+		}
+
+		// evaluate using the whole test dataset
+		printf("\nLast cost: %f; evaluating...\n", error);
+		test_dataset.init_epoch();
+
+		size_t correct = 0;
+		for (auto point_i = 0; point_i < test_dataset.dataset_size; point_i++) {
+			test_dataset.get_single_pair(&dev_input, &dev_expected_output);
+			// TODO evaluate ann
+			ann.predict(dev_input, dev_actual_output);
+
+			int expectedAmax = 0, actualAmax = 0;
+			status = cublasIsamax(cuhand, ann.layer_sizes().back(),
+					dev_expected_output, 1, &expectedAmax);
+//			checkCudaErrors(status);
+			status = cublasIsamax(cuhand, ann.layer_sizes().back(),
+					dev_actual_output, 1, &actualAmax);
+//			checkCudaErrors(status);
+			correct += (expectedAmax == actualAmax) ? 1 : 0;
+		}
+
+		auto accuracy = (double) correct / (double) test_dataset.dataset_size;
+		printf("Epoch %d accuracy: %.3f (%d / %d correct)\n", epoch_i, accuracy,
+				correct, test_dataset.dataset_size);
+	}
+
+	status = cublasDestroy(cuhand);
+//	checkCudaErrors(status);
 
 	return 0;
 }

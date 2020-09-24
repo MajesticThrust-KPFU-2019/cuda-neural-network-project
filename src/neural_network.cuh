@@ -23,7 +23,7 @@ class NeuralNetwork {
 
 private:
 	/** Layer dimensions of the neural network */
-	std::vector<unsigned int> layer_sizes_;
+	std::vector<size_t> layer_sizes_;
 
 	/**
 	 * Weight matrices, column-major, n_layers - 1.
@@ -65,7 +65,7 @@ public:
 	/**
 	 * @param layer_sizes - how many layers the network should have, including input and output layers; must be at least 2
 	 */
-	NeuralNetwork(std::initializer_list<unsigned int> layer_sizes);
+	NeuralNetwork(std::initializer_list<size_t> layer_sizes);
 	~NeuralNetwork();
 
 	/**
@@ -85,7 +85,7 @@ public:
 	 * @param dev_input - device pointer to the input vector
 	 * @param dev_output - device pointer for the output vector
 	 */
-//	void predict(const float *dev_input, /* argmax output? */);
+	void predict(const float *dev_input, float *dev_output);
 	/**
 	 * Update network weights with a single data point.
 	 *
