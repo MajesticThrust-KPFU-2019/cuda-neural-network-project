@@ -14,80 +14,10 @@
 #include "cuda_helpers/helper_cuda.h"
 
 #include "utils.hpp"
-#include <iostream>
-
-// TODO remove
-template<typename T>
-void print_vector2(const std::vector<T>& v) {
-	for (auto o : v) {
-		std::cout << o << " ";
-	}
-	std::cout << std::endl;
-}
-
-/**
- * Invoke a __global__ function with max occupancy.
- * @param dynamicSMemSize - Per-block dynamic shared memory usage intended, in bytes (see cudaOccupancyMaxPotentialBlockSize)
- * @param blockSizeLimit - The maximum block size func is designed to work with. 0 means no limit ((see cudaOccupancyMaxPotentialBlockSize)
- * @param inputSize - number of elements that can be processed in parallel by a single thread each
- * @param func - the __global__ function in question
- * @param funcArgs - func arguments as a parameter_pack
- */
-template<class ...Args>
-void cudaInvokeMaxOccupancy(size_t dynamicSMemSize, int blockSizeLimit,
-		int inputSize, void (*func)(Args...), Args ... funcArgs) {
-	// see https://developer.nvidia.com/blog/cuda-pro-tip-occupancy-api-simplifies-launch-configuration/
-	// The launch configurator returned block size
-	int blockSize;
-	// The minimum grid size needed to achieve the
-	// maximum occupancy for a full device launch
-	int minGridSize;
-
-	cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, func,
-			dynamicSMemSize, blockSizeLimit);
-
-	// The actual grid size needed, based on input size
-	// Round up according to array size
-	auto gridSize = (inputSize + blockSize - 1) / blockSize;
-
-//	printf("Launching kernel with gridSize=%d, blockSize=%d\n", gridSize,
-//			blockSize);
-
-	func<<< gridSize, blockSize >>>(funcArgs...);
-}
-
-/**
- * Convert 2-dim index to 1-dim. Used to index matrices stored as 1-dim arrays.
- * @param i
- * @param j
- * @param ld - leading dimension; number of rows for column-major storage
- */
-inline unsigned int IDX2C(unsigned int i, unsigned int j, unsigned int ld) {
-	return (((j) * (ld)) + (i));
-}
+#include "cuda_utils.cuh"
 
 const decltype(NeuralNetwork::layer_sizes_)& NeuralNetwork::layer_sizes() const {
 	return this->layer_sizes_;
-}
-
-void print_cuda_matrix(const float* dev_ptr, size_t nrows, size_t ncols) {
-	auto h_matrix = new float[nrows * ncols];
-
-	cudaMemcpy(h_matrix, dev_ptr, nrows * ncols * sizeof(float),
-			cudaMemcpyDeviceToHost);
-	getLastCudaError(
-			string_format("Unable to copy data from device (%d) to host",
-					dev_ptr).c_str());
-
-	for (auto i = 0; i < nrows; i++) {
-		for (auto j = 0; j < ncols; j++) {
-			auto idx = IDX2C(i, j, nrows);
-			printf("%.6f\t", h_matrix[idx]);
-		}
-		printf("\n");
-	}
-
-	delete[] h_matrix;
 }
 
 NeuralNetwork::NeuralNetwork(std::initializer_list<size_t> layer_sizes) :
@@ -196,19 +126,19 @@ void NeuralNetwork::init_random(float min, float max) {
 //				"\nFilling layer %d; sizes: [%d, %d]; weights size: %d, biases size: %d\n",
 //				i, l_prev, l_next, weights_size, biases_size);
 
-		// fill weights with (min .. max] floats
+// fill weights with (min .. max] floats
 		auto weights = new std::vector<float>(weights_size);
 		std::generate(weights->begin(), weights->end(), gen_f);
 //		printf("Generated weights %d on host:\n", i);
-//		print_vector2(*weights);
+//		print_vector(*weights);
 
 		auto biases = new std::vector<float>(biases_size);
 //		std::generate(biases->begin(), biases->end(), gen_f);
 		std::fill(biases->begin(), biases->end(), 0);
 //		printf("Generated biases %d on host:\n", i);
-//		print_vector2(*biases);
+//		print_vector(*biases);
 
-		// copy to device
+// copy to device
 		cudaMemcpy(this->dev_weights[i], weights->data(), weights_size,
 				cudaMemcpyHostToDevice);
 		getLastCudaError(
@@ -227,48 +157,6 @@ void NeuralNetwork::init_random(float min, float max) {
 //	void init_from_data() {
 //		// TODO init from data how? what format?
 //	}
-
-/**
- * Vectorized sigmoid function.
- * @param x - input vector allocated on device
- * @param y - output vector allocated on device
- * @param N - length of each vector
- */
-__global__ void sigmoid(const float *x, float *y, size_t N) {
-	int tidx = threadIdx.x + blockIdx.x * blockDim.x;
-	int stride = blockDim.x * gridDim.x;
-
-	for (; tidx < N; tidx += stride) {
-		y[tidx] = 1.0 / (1 + expf(-x[tidx]));
-	}
-}
-
-/**
- * Vectorized sigmoid derivative function.
- * @param x - input vector allocated on device with precomputed sigmoid values
- * @param y - output vector allocated on device
- * @param N - length of each vector
- */
-__global__ void sigmoid_derivative(const float *sig_x, float *y, size_t N) {
-	int tidx = threadIdx.x + blockIdx.x * blockDim.x;
-	int stride = blockDim.x * gridDim.x;
-
-	for (; tidx < N; tidx += stride) {
-		y[tidx] = sig_x[tidx] * (1 - sig_x[tidx]);
-	}
-}
-
-/**
- * Hadamard product for vectors. y is both an input and an output.
- */
-__global__ void vhadamard(const float *x, float *y, size_t N) {
-	int tidx = threadIdx.x + blockIdx.x * blockDim.x;
-	int stride = blockDim.x * gridDim.x;
-
-	for (; tidx < N; tidx += stride) {
-		y[tidx] = y[tidx] * x[tidx];
-	}
-}
 
 void NeuralNetwork::evaluate(const float *dev_input) {
 	cublasStatus_t status;
@@ -303,8 +191,8 @@ void NeuralNetwork::evaluate(const float *dev_input) {
 //		print_cuda_matrix(layer_input, l_prev, 1);
 //		printf("\n");
 
-		// y param in cublasSgemv is both an input (bias) and an output (activation)
-		// hence, copy bias into the activation
+// y param in cublasSgemv is both an input (bias) and an output (activation)
+// hence, copy bias into the activation
 		cudaMemcpy(layer_output, this->dev_biases[i], l_next * sizeof(float),
 				cudaMemcpyDeviceToDevice);
 		getLastCudaError(
@@ -319,7 +207,7 @@ void NeuralNetwork::evaluate(const float *dev_input) {
 //		print_cuda_matrix(layer_output, l_next, 1);
 //		printf("\n");
 
-		// apply sigmoid in-place to activation vector
+// apply sigmoid in-place to activation vector
 		cudaInvokeMaxOccupancy(0, 0, l_next, sigmoid,
 				(const float *) layer_output, layer_output, l_next);
 
@@ -400,7 +288,7 @@ void NeuralNetwork::train(const float* dev_x_train, const float* dev_y_train,
 
 //	printf("Updating weights\n");
 //	printf("Layers:\n");
-//	print_vector2(this->layer_sizes());
+//	print_vector(this->layer_sizes());
 //	printf("Error i+1:\n");
 //	print_cuda_matrix(this->dev_errors[i], rnext, 1);
 //	printf("Activation i:\n");

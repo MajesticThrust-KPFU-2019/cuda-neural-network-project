@@ -12,6 +12,8 @@
 #include <vector>
 #include <cublas_v2.h>
 
+#include "genetic-algorithm.cuh"
+
 /**
  * @brief - A host object that uses CUDA kernels under the hood to speed up the calculations.
  */
@@ -20,6 +22,8 @@ class NeuralNetwork {
 	// can be a enum or an abstract class template parameter with virtual
 	// __device__ methods for the function and the derivative
 	// the class must be created on the device for the virtual methods to work!
+private:
+	friend class GeneticAlgorithmManager;
 
 private:
 	/** Layer dimensions of the neural network */

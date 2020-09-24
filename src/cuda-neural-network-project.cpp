@@ -12,20 +12,17 @@
 //#include "mnist/mnist_reader.hpp"
 
 #include <cuda_runtime.h>
-#include "cuda_helpers/helper_cuda.h"
 #include <cublas_v2.h>
+// include after cuda libs to make checkCudaErrors work with their statuses
+#include "cuda_helpers/helper_cuda.h"
 
 #include "neural_network.cuh"
 #include "device_dataset.cuh"
+#include "genetic-algorithm.cuh"
 
-void print_vector(const std::vector<float>& v) {
-	for (auto o : v) {
-		std::cout << o << " ";
-	}
-	std::cout << std::endl;
-}
+#include "utils.hpp"
 
-int main_test() {
+int main_backprop_test() {
 //	auto dataset = mnist::read_dataset<std::vector, std::vector, uint8_t,
 //			uint8_t>();
 
@@ -96,7 +93,7 @@ int main_test() {
 	return 0;
 }
 
-int main() {
+int main_backprop() {
 	auto train_dataset = MnistDeviceDatasetProvider(true);
 	auto test_dataset = MnistDeviceDatasetProvider(false);
 	auto ann = NeuralNetwork { train_dataset.x_size, 300, train_dataset.y_size };
@@ -117,7 +114,7 @@ int main() {
 
 	cublasHandle_t cuhand;
 	auto status = cublasCreate(&cuhand);
-//	checkCudaErrors(status);
+	checkCudaErrors(status);
 
 	for (auto epoch_i = 0; epoch_i < epoch_count; epoch_i++) {
 		// train using the whole training dataset
@@ -141,16 +138,16 @@ int main() {
 		size_t correct = 0;
 		for (auto point_i = 0; point_i < test_dataset.dataset_size; point_i++) {
 			test_dataset.get_single_pair(&dev_input, &dev_expected_output);
-			// TODO evaluate ann
+
 			ann.predict(dev_input, dev_actual_output);
 
 			int expectedAmax = 0, actualAmax = 0;
 			status = cublasIsamax(cuhand, ann.layer_sizes().back(),
 					dev_expected_output, 1, &expectedAmax);
-//			checkCudaErrors(status);
+			checkCudaErrors(status);
 			status = cublasIsamax(cuhand, ann.layer_sizes().back(),
 					dev_actual_output, 1, &actualAmax);
-//			checkCudaErrors(status);
+			checkCudaErrors(status);
 			correct += (expectedAmax == actualAmax) ? 1 : 0;
 		}
 
@@ -160,7 +157,22 @@ int main() {
 	}
 
 	status = cublasDestroy(cuhand);
-//	checkCudaErrors(status);
+	checkCudaErrors(status);
 
 	return 0;
+}
+
+int main_genetic() {
+	// population 20, 5% mutations
+	auto gen = GeneticAlgorithmManager(20, 0.05);
+
+	// 2% accuracy threshold, 100 generations max
+	gen.run(0.02, 100);
+
+	return 0;
+}
+
+int main() {
+//	return main_backprop();
+	return main_genetic();
 }
