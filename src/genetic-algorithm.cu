@@ -211,14 +211,34 @@ void GeneticAlgorithmManager::run(float fitness_threshold,
 	// TODO retrieve and copy the neural network via current_top_i
 }
 
+/**
+ * Copy `N` floats with offset `offset` from `dev_from` to `dev_to` (device to device).
+ *
+ * `dev_from` must have enough allocated memory for at least `offset_from` + `N` floats.
+ * `dev_to` must have enough allocated memory for at least `offset_to` + `N` floats.
+ */
+__global__ void copy_offset(const float *dev_from, size_t offset_from, size_t N,
+		float *dev_to, size_t offset_to) {
+	int tidx = threadIdx.x + blockIdx.x * blockDim.x;
+	int stride = blockDim.x * gridDim.x;
+
+	for (; tidx < N; tidx += stride) {
+		dev_to[offset_to + tidx] = dev_from[offset_from + tidx];
+	}
+}
+
 void GeneticAlgorithmManager::nn_to_chromosome(NeuralNetwork* nn,
 		float* dev_chromosome) {
 	size_t offset = 0;
 	for (auto i = 0; i < (*nn).layer_sizes().size(); i++) {
 		auto size = (*nn).layer_sizes()[i];
-		cudaMemcpy(dev_chromosome + offset, (*nn).dev_weights[i],
-				size * sizeof(float), cudaMemcpyDeviceToDevice);
-		getLastCudaError("Error copying nn weights to chromosome");
+		cudaInvokeMaxOccupancy(0, 0, size, copy_offset,
+				(const float *) (*nn).dev_weights[i], (size_t) 0, size,
+				dev_chromosome, offset);
+//		cudaMemcpy(dev_chromosome + offset, (*nn).dev_weights[i],
+//				size * sizeof(float), cudaMemcpyDeviceToDevice);
+//		getLastCudaError("Error copying nn weights to chromosome");
+		offset += size;
 	}
 }
 
@@ -227,9 +247,12 @@ void GeneticAlgorithmManager::chromosome_to_nn(NeuralNetwork* nn,
 	size_t offset = 0;
 	for (auto i = 0; i < (*nn).layer_sizes().size(); i++) {
 		auto size = (*nn).layer_sizes()[i];
-		cudaMemcpy((*nn).dev_weights[i], dev_chromosome + offset,
-				size * sizeof(float), cudaMemcpyDeviceToDevice);
-		getLastCudaError("Error copying chromosome to nn weights");
+		cudaInvokeMaxOccupancy(0, 0, size, copy_offset, dev_chromosome, offset,
+				size, (*nn).dev_weights[i], (size_t) 0);
+//		cudaMemcpy((*nn).dev_weights[i], dev_chromosome + offset,
+//				size * sizeof(float), cudaMemcpyDeviceToDevice);
+//		getLastCudaError("Error copying chromosome to nn weights");
+		offset += size;
 	}
 }
 
