@@ -16,15 +16,27 @@
 #include "utils.hpp"
 #include "cuda_utils.cuh"
 
+void print_memory_usage() {
+	size_t free_byte, total_byte;
+	cudaMemGetInfo(&free_byte, &total_byte);
+	getLastCudaError("Error getting memory info");
+	printf("Free memory (bytes): %u/%u\n", free_byte, total_byte);
+}
+
 const decltype(NeuralNetwork::layer_sizes_)& NeuralNetwork::layer_sizes() const {
 	return this->layer_sizes_;
 }
 
 NeuralNetwork::NeuralNetwork(std::initializer_list<size_t> layer_sizes) :
 		layer_sizes_(layer_sizes) {
+	printf("Initializing ANN with layer sizes: ");
+	print_vector(this->layer_sizes_);
+
 	if (this->layer_sizes_.size() < 2) {
 		throw std::invalid_argument("Must specify at least 2 layers!");
 	}
+
+	print_memory_usage();
 
 	// allocate weights
 	this->dev_weights = std::vector<float*>(this->layer_sizes_.size() - 1);
@@ -38,6 +50,8 @@ NeuralNetwork::NeuralNetwork(std::initializer_list<size_t> layer_sizes) :
 				string_format("Error allocating weights %d", i).c_str());
 	}
 
+	print_memory_usage();
+
 	// allocate biases
 	this->dev_biases = std::vector<float*>(this->layer_sizes_.size() - 1);
 	for (auto i = 0; i < this->layer_sizes_.size() - 1; i++) {
@@ -48,6 +62,8 @@ NeuralNetwork::NeuralNetwork(std::initializer_list<size_t> layer_sizes) :
 		getLastCudaError(
 				string_format("Error allocating biases %d", i).c_str());
 	}
+
+	print_memory_usage();
 
 	// allocate activations
 	this->dev_activations = std::vector<float*>(this->layer_sizes_.size());
@@ -60,6 +76,8 @@ NeuralNetwork::NeuralNetwork(std::initializer_list<size_t> layer_sizes) :
 				string_format("Error allocating activation %d", i).c_str());
 	}
 
+	print_memory_usage();
+
 	// allocate error vectors, skip the input layer
 	this->dev_errors = std::vector<float*>(this->layer_sizes_.size() - 1);
 	for (auto i = 0; i < this->layer_sizes_.size() - 1; i++) {
@@ -70,17 +88,14 @@ NeuralNetwork::NeuralNetwork(std::initializer_list<size_t> layer_sizes) :
 		getLastCudaError(string_format("Error allocating error %d", i).c_str());
 	}
 
-	// allocate intermediate vector
-	auto max_layer_size = *std::max_element(this->layer_sizes_.cbegin(),
-			this->layer_sizes_.cend());
-	cudaMalloc((void**) &this->dev_intermediate,
-			max_layer_size * sizeof(float));
-	getLastCudaError(
-			string_format("Error allocating intermediate vector").c_str());
+	print_memory_usage();
 
 	// allocate context
+	printf("Allocating cublas context\n");
 	auto status = cublasCreate(&this->cublasHandle);
 	checkCudaErrors(status);
+
+	print_memory_usage();
 }
 
 NeuralNetwork::~NeuralNetwork() {
@@ -99,8 +114,6 @@ NeuralNetwork::~NeuralNetwork() {
 	for (auto const &dev_ptr : this->dev_errors) {
 		cudaFree(dev_ptr);
 	}
-
-	cudaFree(this->dev_intermediate);
 
 	auto status = cublasDestroy(this->cublasHandle);
 	checkCudaErrors(status);
@@ -165,7 +178,7 @@ void NeuralNetwork::evaluate(const float *dev_input) {
 			this->layer_sizes_[0] * sizeof(float), cudaMemcpyDeviceToDevice);
 	getLastCudaError("Error copying input vector to the first activation");
 
-	float alpha = 1, beta = 1;
+	float alpha = 1, beta = 0;
 
 	// propagate forward
 	for (auto i = 0; i < this->layer_sizes_.size() - 1; i++) {
@@ -191,12 +204,12 @@ void NeuralNetwork::evaluate(const float *dev_input) {
 //		print_cuda_matrix(layer_input, l_prev, 1);
 //		printf("\n");
 
-// y param in cublasSgemv is both an input (bias) and an output (activation)
-// hence, copy bias into the activation
-		cudaMemcpy(layer_output, this->dev_biases[i], l_next * sizeof(float),
-				cudaMemcpyDeviceToDevice);
-		getLastCudaError(
-				string_format("Copying bias %d to activation", i).c_str());
+		// y param in cublasSgemv is both an input (bias) and an output (activation)
+		// hence, copy bias into the activation
+//		cudaMemcpy(layer_output, this->dev_biases[i], l_next * sizeof(float),
+//				cudaMemcpyDeviceToDevice);
+//		getLastCudaError(
+//				string_format("Copying bias %d to activation", i).c_str());
 
 		status = cublasSgemv(this->cublasHandle, CUBLAS_OP_N, l_next, l_prev,
 				&alpha, this->dev_weights[i], l_next, layer_input, 1, &beta,

@@ -45,9 +45,6 @@ private:
 	/** Errors for each layer, n_layers - 1 */
 	std::vector<float*> dev_errors;
 
-	/** A vector for intermediate calculations, length = max(layer_sizes) */
-	float* dev_intermediate;
-
 	/** cuBLAS context */
 	cublasHandle_t cublasHandle;
 
